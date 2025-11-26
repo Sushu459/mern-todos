@@ -1,179 +1,151 @@
 const Todo = require("../models/Todo");
 
 // GET /api/todos
-// Query: status, priority, search, sortBy, sortOrder
-const getTodos = async (req, res) => {
+const getTodos = async (req, res, next) => {
   try {
-    const { status, priority, search, sortBy, sortOrder } = req.query;
+    const { status, search, sortBy = "createdAt", sortOrder = "desc" } =
+      req.query;
 
-    const query = { owner: req.user._id };
+    const query = { user: req.user._id };
 
-    if (status) {
-      query.status = status;
-    }
-
-    if (priority) {
-      query.priority = priority;
-    }
-
+    if (status) query.status = status;
     if (search) {
-      query.$or = [
-        { title: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } },
-      ];
+      query.title = { $regex: search, $options: "i" };
     }
 
-    let sortOptions = { createdAt: -1 };
+    const sort = { [sortBy]: sortOrder === "asc" ? 1 : -1 };
 
-    if (sortBy) {
-      const order = sortOrder === "asc" ? 1 : -1;
-      sortOptions = { [sortBy]: order };
-    }
-
-    const todos = await Todo.find(query).sort(sortOptions);
-
-    res.json(todos);
-  } catch (error) {
-    console.error("Get todos error:", error);
-    res.status(500).json({ message: "Server error" });
+    const todos = await Todo.find(query).sort(sort);
+    return res.json(todos);
+  } catch (err) {
+    console.error("Get todos error:", err);
+    next(err);
   }
 };
 
 // POST /api/todos
-const createTodo = async (req, res) => {
+const createTodo = async (req, res, next) => {
   try {
-    const { title, description, status, priority, dueDate, tags, project } =
-      req.body;
+    const { title, description, priority, dueDate } = req.body;
 
-    if (!title) {
+    if (!title || !title.trim()) {
       return res.status(400).json({ message: "Title is required" });
     }
 
+    const validPriorities = ["low", "medium", "high"];
+    let normalizedPriority = "medium";
+
+    if (priority && typeof priority === "string") {
+      const lower = priority.toLowerCase();
+      if (validPriorities.includes(lower)) {
+        normalizedPriority = lower;
+      }
+    }
+
+    let parsedDueDate = null;
+    if (dueDate) {
+      const d = new Date(dueDate);
+      if (!isNaN(d.getTime())) {
+        parsedDueDate = d;
+      }
+    }
+
     const todo = await Todo.create({
-      title,
-      description,
-      status,
-      priority,
-      dueDate,
-      tags,
-      project,
-      owner: req.user._id,
+      user: req.user._id,
+      title: title.trim(),
+      description: description || "",
+      priority: normalizedPriority,
+      dueDate: parsedDueDate,
     });
 
-    res.status(201).json(todo);
-  } catch (error) {
-    console.error("Create todo error:", error);
-    res.status(500).json({ message: "Server error" });
+    return res.status(201).json(todo);
+  } catch (err) {
+    console.error("Create todo error:", err);
+    if (err.name === "ValidationError") {
+      return res.status(400).json({ message: err.message });
+    }
+    next(err);
   }
 };
 
-// GET /api/todos/:id
-const getTodoById = async (req, res) => {
+// PATCH /api/todos/:id
+const updateTodo = async (req, res, next) => {
   try {
     const todo = await Todo.findOne({
       _id: req.params.id,
-      owner: req.user._id,
+      user: req.user._id,
     });
 
     if (!todo) {
-      return res.status(404).json({ message: "Todo not found" });
+      return res.status(404).json({ message: "Task not found" });
     }
 
-    res.json(todo);
-  } catch (error) {
-    console.error("Get todo by id error:", error);
-    res.status(500).json({ message: "Server error" });
-  }
-};
-
-// PUT /api/todos/:id
-const updateTodo = async (req, res) => {
-  try {
-    let todo = await Todo.findOne({
-      _id: req.params.id,
-      owner: req.user._id,
+    const fields = ["title", "description", "priority", "status", "dueDate"];
+    fields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        if (field === "dueDate" && req.body[field]) {
+          const d = new Date(req.body[field]);
+          if (!isNaN(d.getTime())) {
+            todo[field] = d;
+          }
+        } else {
+          todo[field] = req.body[field];
+        }
+      }
     });
 
-    if (!todo) {
-      return res.status(404).json({ message: "Todo not found" });
-    }
-
-    const {
-      title,
-      description,
-      status,
-      priority,
-      dueDate,
-      tags,
-      project,
-    } = req.body;
-
-    todo.title = title ?? todo.title;
-    todo.description = description ?? todo.description;
-    todo.status = status ?? todo.status;
-    todo.priority = priority ?? todo.priority;
-    todo.dueDate = dueDate ?? todo.dueDate;
-    todo.tags = tags ?? todo.tags;
-    todo.project = project ?? todo.project;
-
-    const updatedTodo = await todo.save();
-
-    res.json(updatedTodo);
-  } catch (error) {
-    console.error("Update todo error:", error);
-    res.status(500).json({ message: "Server error" });
-  }
-};
-
-// DELETE /api/todos/:id
-const deleteTodo = async (req, res) => {
-  try {
-    const todo = await Todo.findOne({
-      _id: req.params.id,
-      owner: req.user._id,
-    });
-
-    if (!todo) {
-      return res.status(404).json({ message: "Todo not found" });
-    }
-
-    await todo.deleteOne();
-
-    res.json({ message: "Todo removed" });
-  } catch (error) {
-    console.error("Delete todo error:", error);
-    res.status(500).json({ message: "Server error" });
+    const updated = await todo.save();
+    return res.json(updated);
+  } catch (err) {
+    console.error("Update todo error:", err);
+    next(err);
   }
 };
 
 // PATCH /api/todos/:id/toggle-status
-const toggleTodoStatus = async (req, res) => {
+const toggleTodoStatus = async (req, res, next) => {
   try {
     const todo = await Todo.findOne({
       _id: req.params.id,
-      owner: req.user._id,
+      user: req.user._id,
     });
 
     if (!todo) {
-      return res.status(404).json({ message: "Todo not found" });
+      return res.status(404).json({ message: "Task not found" });
     }
 
     todo.status = todo.status === "completed" ? "pending" : "completed";
+    const updated = await todo.save();
+    return res.json(updated);
+  } catch (err) {
+    console.error("Toggle status error:", err);
+    next(err);
+  }
+};
 
-    const updatedTodo = await todo.save();
+// DELETE /api/todos/:id
+const deleteTodo = async (req, res, next) => {
+  try {
+    const todo = await Todo.findOneAndDelete({
+      _id: req.params.id,
+      user: req.user._id,
+    });
 
-    res.json(updatedTodo);
-  } catch (error) {
-    console.error("Toggle todo status error:", error);
-    res.status(500).json({ message: "Server error" });
+    if (!todo) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    return res.json({ message: "Task deleted" });
+  } catch (err) {
+    console.error("Delete todo error:", err);
+    next(err);
   }
 };
 
 module.exports = {
   getTodos,
   createTodo,
-  getTodoById,
   updateTodo,
-  deleteTodo,
   toggleTodoStatus,
+  deleteTodo,
 };

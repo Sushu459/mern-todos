@@ -1,5 +1,4 @@
 const express = require("express");
-const router = express.Router();
 const { protect } = require("../middleware/authMiddleware");
 const {
   getMe,
@@ -7,11 +6,19 @@ const {
   changePassword,
 } = require("../controllers/userController");
 
-// /api/users/me
-router.get("/me", protect, getMe);
-router.put("/me", protect, updateProfile);
+const router = express.Router();
 
-// /api/users/me/change-password
-router.put("/me/change-password", protect, changePassword);
+// All routes below require authentication
+router.use(protect);
+
+// GET /api/users/me
+// PUT /api/users/me
+router
+  .route("/me")
+  .get(getMe)
+  .put(updateProfile);
+
+// PUT /api/users/me/change-password
+router.put("/me/change-password", changePassword);
 
 module.exports = router;

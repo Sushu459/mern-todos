@@ -1,32 +1,29 @@
 const express = require("express");
-const router = express.Router();
 const { protect } = require("../middleware/authMiddleware");
 const {
   getTodos,
   createTodo,
-  getTodoById,
   updateTodo,
-  deleteTodo,
   toggleTodoStatus,
+  deleteTodo,
 } = require("../controllers/todoController");
 
-// All routes below are protected
+const router = express.Router();
+
+// All todo routes require auth
 router.use(protect);
 
 // GET /api/todos
-router.get("/", getTodos);
-
 // POST /api/todos
-router.post("/", createTodo);
+router.route("/")
+  .get(getTodos)     // 👈 this is defined now
+  .post(createTodo);
 
-// GET /api/todos/:id
-router.get("/:id", getTodoById);
-
-// PUT /api/todos/:id
-router.put("/:id", updateTodo);
-
+// PATCH /api/todos/:id
 // DELETE /api/todos/:id
-router.delete("/:id", deleteTodo);
+router.route("/:id")
+  .patch(updateTodo)
+  .delete(deleteTodo);
 
 // PATCH /api/todos/:id/toggle-status
 router.patch("/:id/toggle-status", toggleTodoStatus);
